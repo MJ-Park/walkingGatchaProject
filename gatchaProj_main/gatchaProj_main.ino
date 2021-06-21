@@ -1,5 +1,6 @@
-/*  gatchaProj_main_v0.2.ino
+/*  gatchaProj_main_v0.3.ino
 
+    v0.3 변경점 : 각 모드를 while문으로 묶고, 특정 조건에서 break 하도록 변경
     2021-06-19
     Minju Park (pmz671712@gmail.com)
 */
@@ -10,9 +11,14 @@
 #define PIN_IN3 4                      // 가챠모터 PIN
 #define PIN_IN4 5                      // 가챠모터 PIN
 #define PIN_WALKING_DETECTION A0       // 워킹패드 모터 전압 감지 Analog PIN
-#define PIN_ANALOG_MAGNETIC_SENSOR A1  // 리니어 홀센서 Analog PIN
 #define PIN_GATCHA_MAGNET_SENSOR 8  // 리니어 홀센서 Digital PIN
 #define PIN_MAIN_MAGNET_SENSOR 9
+
+#define MODE_INIT 0x00
+#define MODE_WAITING 0x01
+#define MODE_WALKING 0x02
+#define MODE_GATCHA 0x03
+#define MODE_RESTORE 0x04
 
 // timer0 외부변수 정의
 extern volatile unsigned long timer0_millis;
@@ -20,11 +26,12 @@ extern volatile unsigned long timer0_millis;
 // 구동을 위한 상수 정의
 const int WALK_DETECT_THRESHOLD = 25;   // 모터회전 전압을 걷는중 상태로 감지하기 위한 임계값
 const int MAX_ISWALKING_TIME = 1500;     // (ms) 걸음 감지가 안됐을경우 걷지 않음으로 변경하기 위한 시간값
+const int MAX_WALK_MODE_TIME = 180000;   // (ms) 3분동안 걸었는데 원점 감지가 안되는 경우를 위한 시간값
 const int MAX_MAGNET_WAIT_TIME = 1000;   // (ms) 자석 감지가 안됐을 경우 원점 벗어남으로 변경하기 위한 시간값
 const int AFTER_GATCHA_DELAY_TIME = 10000; // (ms) 가챠 투하 후 기기 휴식시간값
 const int MIN_GATCHA_MOTOR_ON_TIME = 1500;  // (ms) 시작하자마자 가챠 투하모드 끝나는거 방지하기 위한 최소 작동 시간
 const int MAX_GATCHA_MOTOR_ON_TIME = 5000;   // (ms) 가챠 투하모드 최대 지속시간
-const int MIN_WALK_MODE_DURATION_TIME = 5000; // (ms) 걷기모드 최소 지속시간
+const int MIN_WALK_MODE_TIME = 5000; // (ms) 걷기모드 최소 지속시간
 
 // 동작 상태 관련 변수 (boolean)
 volatile bool isWalking = false;        // true = 걷는중 / false = 걷지않는중
@@ -35,11 +42,8 @@ volatile bool isOrigin = false;         // true = 현재 원점(자석감지o) /
 // 시간 변수 (unsigned long)
 unsigned long lastWalkTime = 0;         // 마지막으로 걸음 간지된 시간
 unsigned long mainMotorOnTime = 0;      // 마지막으로 메인모터 작동 시작 시간
-unsigned long mainMotorOffTime = 0;     // 마지막으로 메인모터 작동 종료 시간
 unsigned long lastOriginTime = 0;       // 마지막으로 원점에 도착한 시간
 unsigned long gatchaMotorOnTime = 0;    // 마지막으로 가챠모터 작동 시작 시간
-unsigned long gatchaMotorOffTime = 0;   // 마지막으로 가챠모터 작동 종료 시간
-unsigned long walkModeStartTime = 0;    // 걷는중 모드 시작된 시간 (한바퀴 돌기 시작한 시간 감지 위해)
 
 // Count 변수
 unsigned int total_complete = 0;
@@ -47,7 +51,7 @@ unsigned int total_complete = 0;
 // 모드 변수
 // 0 : 부팅 / 1 : 대기 / 2 : 걷는중 / 3 : 완료
 // 4 : 원점복구 / 5 : 오류
-volatile uint8_t mode = 0x00;
+volatile uint8_t mode = MODE_INIT;
 
 void setup() {
   pinMode(PIN_IN1, OUTPUT);
@@ -55,7 +59,6 @@ void setup() {
   pinMode(PIN_IN3, OUTPUT);
   pinMode(PIN_IN4, OUTPUT);
   pinMode(PIN_WALKING_DETECTION, INPUT);
-  // pinMode(PIN_ANALOG_MAGNETIC_SENSOR, INPUT);
   pinMode(PIN_GATCHA_MAGNET_SENSOR, INPUT);
   pinMode(PIN_MAIN_MAGNET_SENSOR, INPUT);
 
@@ -69,16 +72,13 @@ void setup() {
     detectMainOrigin();
     // 원점에 있으면 바로 대기 모드로 전환
     if (isOrigin){
-      mode = 0x01;
+      mode = MODE_WAITING;
       break;
     }
     // 1초동안 기다렸는데도 자석 감지 안되면 원점 복구모드
     else if(timer0_millis > 1000){
-      if ( !isMainMotorOn ) {
-        mainMotorOn();
-      }
-      // mode = 0x04;  // 원점 복구모드로 전환
-      // break;
+      mode = MODE_RESTORE;
+      break;
     }
   }
 }
@@ -86,44 +86,66 @@ void setup() {
 void loop() {
   // 오류를 최소화하기 위해 4가지 모드와 에러 상태 사용
   switch(mode) {
-    case 0x01:  // 대기 모드
-      detectWalking();
-//      detectMainOrigin();
-      if (isWalking) {
-        walkModeStartTime = timer0_millis;
-        mode++; // 걷는중 모드로 전환
+    case MODE_WAITING:  // 대기 모드
+      while(1) {
+        detectWalking();
+        if (isWalking) {
+          mode = MODE_WALKING; // 걷는중 모드로 전환
+          // 메인모터 켜기
+          digitalWrite(PIN_IN1, HIGH);
+          digitalWrite(PIN_IN2, LOW);
+          mainMotorOnTime = timer0_millis;
+          isMainMotorOn = true;
+          delay(MIN_WALK_MODE_TIME);
+          break;
+        }
       }
     break;
 
-    case 0x02:  // 걷는중 모드
-      detectWalking();
-      detectMainOrigin();
+    case MODE_WALKING:  // 걷는중 모드
+      while(1) {
+        detectWalking();
+        detectMainOrigin();
 
-      if (isWalking) {
-        //걷는중 + 메인모터 꺼져있으면 메인모터 켜고 5초 딜레이
-        if(!isMainMotorOn) {
-          mainMotorOn();
-          delay(MIN_WALK_MODE_DURATION_TIME);
+        if(!isWalking) {
+          // 중간에 움직임 멈추면 모터 종료 후 복구 모드로 전환
+          digitalWrite(PIN_IN1,LOW);
+          digitalWrite(PIN_IN2,LOW);
+          isMainMotorOn = false;
+
+          mode = MODE_RESTORE;
+          delay(500);
+          break;
         }
-        // 걷는중 + 메인모터 켜져있음 + 원점도달하면 모터 끄고 완료 모드로 전환
         else if(isOrigin) {
-          mainMotorOff();
-          mode++;   // 완료 모드로 전환
-          delay(1000);
+          // 움직임 멈춤 없이 원점까지 되돌아오면 모터 종료 후 가챠모드로 전환
+          digitalWrite(PIN_IN1,LOW);
+          digitalWrite(PIN_IN2,LOW);
+          isMainMotorOn = false;
+
+          mode = MODE_GATCHA;
+          delay(500);
+          break;
         }
-      }
-      else {
-        if(isMainMotorOn) {
-          // if(timer0_millis - mainMotorOnTime > MIN_WALK_MODE_DURATION_TIME ) {
-            mainMotorOff();
-            mode = 0x04;  // 중간에 이탈한 경우 복구 모드로 전환
-          // }
+
+        if(timer0_millis - mainMotorOnTime >= MAX_WALK_MODE_TIME) {
+          // 3분 이상 걸었는데 원점 감지가 안된 경우
+          // 가챠 일단 하나 주고 복구모드로 전환
+          gatchaMotorOn();
+          delay(MIN_GATCHA_MOTOR_ON_TIME);
+          while(1) {
+            if (digitalRead(PIN_GATCHA_MAGNET_SENSOR))  break;  // 정상적으로 자석 감지해서 종료
+            else if(timer0_millis - gatchaMotorOnTime >= MAX_GATCHA_MOTOR_ON_TIME) break; // 만약 정상적으로 자석 감지하지 못하더라도 일정 시간 지나면 종료
+          }
+          gatchaMotorOff();
+          delay(5000);
+          mode = MODE_RESTORE;
+          break;
         }
-      
       }
     break;
 
-    case 0x03:  // 완료 모드 (가챠 투하 모드).
+    case MODE_GATCHA:  // 완료 모드 (가챠 투하 모드).
       gatchaMotorOn();
       delay(MIN_GATCHA_MOTOR_ON_TIME);  // 시작하자마자 자석 감지해서 끝나는거 방지
       while(1) {
@@ -133,17 +155,29 @@ void loop() {
       gatchaMotorOff();
 
       total_complete++;
-      mode = 0x01;  // 대기 모드로 전환
+      mode = MODE_WAITING;  // 대기 모드로 전환
       delay(AFTER_GATCHA_DELAY_TIME); // 가챠 한번 떨어지면 일정 시간 후에 대기 모드로 전환 (연속 작동 x)
     break;
 
-    case 0x04:  // 원점 복구 모드
-      detectMainOrigin();
-      if (isOrigin) {
-        mainMotorOff();
-        mode = 0x01;  //대기 모드로 전환
+    case MODE_RESTORE:  // 원점 복구 모드
+      while(1) {
+        detectMainOrigin();
+        // 메인모터 거꾸로 돌릴수 있으면 거꾸로 돌리는게 나을듯
+        if(isOrigin) {
+          digitalWrite(PIN_IN1,LOW);
+          digitalWrite(PIN_IN2,LOW);
+          isMainMotorOn = false;
+          mode = MODE_WAITING;    // 대기 모드로 전환
+          delay(500); 
+          break;
+        }
+        else if(!isMainMotorOn) {
+          digitalWrite(PIN_IN1, LOW);
+          digitalWrite(PIN_IN2, HIGH);
+          isMainMotorOn = true;
+        }
       }
-      else if (!isMainMotorOn) mainMotorOn();
+
     break;
 
     default:  // Error state
@@ -190,16 +224,12 @@ void detectMainOrigin() {
 }
 
 void mainMotorOn() {
-  digitalWrite(PIN_IN1, HIGH);
-  digitalWrite(PIN_IN2, LOW);
-  mainMotorOnTime = timer0_millis;
-  isMainMotorOn = true;
+
 }
 
 void mainMotorOff() {
   digitalWrite(PIN_IN1, LOW);
   digitalWrite(PIN_IN2, LOW);
-  mainMotorOffTime = timer0_millis;
   isMainMotorOn = false;
 }
 
@@ -213,36 +243,5 @@ void gatchaMotorOn() {
 void gatchaMotorOff() {
   digitalWrite(PIN_IN3, LOW);
   digitalWrite(PIN_IN4, LOW);
-  gatchaMotorOffTime = timer0_millis;
   isGatchaMotorOn = false;
 }
-
-
-    // case 0x02:  // 걷는중 모드
-    //   detectWalking();
-    //   detectMainOrigin();
-
-    //   // // 조금씩 회전하기 위해서 메인모터 일정 시간 이상 작동하면 꺼짐 
-    //   // if( isMainMotorOn && timer0_millis - mainMotorOnTime > MAIN_MOTOR_ON_TIME )
-    //   //   mainMotorOff();
-
-
-    //   // 한바퀴 다 돌았는지 감지. 메인모터 끄기
-    //   if( isOrigin ) {
-    //     if ( timer0_millis - walkModeStartTime > MIN_WALK_MODE_DURATION_TIME) {
-    //       mainMotorOff();
-    //       mode++;   // 완료 모드로 전환
-    //     }
-    //   }
-
-    //   // 중간에 이탈했는지 감지
-    //   if (!isWalking) {
-    //     mainMotorOff();
-    //     mode = 0x04;  // 원점 복구 모드로 전환
-    //   }
-
-    //   // // 메인모터가 마지막으로 작동한지 일정 시간 이상 됐으면 작동
-    //   // if( !isMainMotorOn && timer0_millis - mainMotorOffTime > MAIN_MOTOR_REPEAT_TIME )
-    //   //   mainMotorOn();
-
-    // break;
