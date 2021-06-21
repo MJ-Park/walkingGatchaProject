@@ -1,6 +1,6 @@
-/*  gatchaProj_main_v0.1.ino
+/*  gatchaProj_main_v0.2.ino
 
-    2021-06-16
+    2021-06-19
     Minju Park (pmz671712@gmail.com)
 */
 
@@ -18,10 +18,8 @@
 extern volatile unsigned long timer0_millis;
 
 // 구동을 위한 상수 정의
-const int WALK_DETECT_THRESHOLD = 100;   // 모터회전 전압을 걷는중 상태로 감지하기 위한 임계값
+const int WALK_DETECT_THRESHOLD = 25;   // 모터회전 전압을 걷는중 상태로 감지하기 위한 임계값
 const int MAX_ISWALKING_TIME = 1500;     // (ms) 걸음 감지가 안됐을경우 걷지 않음으로 변경하기 위한 시간값
-// const int MAIN_MOTOR_ON_TIME = 1000;     // (ms) 메인모터가 한번 작동하는 시간값
-// const int MAIN_MOTOR_REPEAT_TIME = 7000; // (ms) 지속적으로 걸을시 메인모터 작동 반복 딜레이 시간값
 const int MAX_MAGNET_WAIT_TIME = 1000;   // (ms) 자석 감지가 안됐을 경우 원점 벗어남으로 변경하기 위한 시간값
 const int AFTER_GATCHA_DELAY_TIME = 10000; // (ms) 가챠 투하 후 기기 휴식시간값
 const int MIN_GATCHA_MOTOR_ON_TIME = 1500;  // (ms) 시작하자마자 가챠 투하모드 끝나는거 방지하기 위한 최소 작동 시간
@@ -67,9 +65,22 @@ void setup() {
   digitalWrite(PIN_IN4, LOW);
 
   // 자석이 원점에 있는지 확인
-
-  
-  mode++; // 대기 모드로 전환
+  while(1) {
+    detectMainOrigin();
+    // 원점에 있으면 바로 대기 모드로 전환
+    if (isOrigin){
+      mode = 0x01;
+      break;
+    }
+    // 1초동안 기다렸는데도 자석 감지 안되면 원점 복구모드
+    else if(timer0_millis > 1000){
+      if ( !isMainMotorOn ) {
+        mainMotorOn();
+      }
+      // mode = 0x04;  // 원점 복구모드로 전환
+      // break;
+    }
+  }
 }
 
 void loop() {
@@ -77,7 +88,7 @@ void loop() {
   switch(mode) {
     case 0x01:  // 대기 모드
       detectWalking();
-      detectMainOrigin();
+//      detectMainOrigin();
       if (isWalking) {
         walkModeStartTime = timer0_millis;
         mode++; // 걷는중 모드로 전환
@@ -89,14 +100,16 @@ void loop() {
       detectMainOrigin();
 
       if (isWalking) {
+        //걷는중 + 메인모터 꺼져있으면 메인모터 켜고 5초 딜레이
         if(!isMainMotorOn) {
           mainMotorOn();
           delay(MIN_WALK_MODE_DURATION_TIME);
         }
-        if(isOrigin) {
+        // 걷는중 + 메인모터 켜져있음 + 원점도달하면 모터 끄고 완료 모드로 전환
+        else if(isOrigin) {
           mainMotorOff();
-          mode++;
-          delay(500);
+          mode++;   // 완료 모드로 전환
+          delay(1000);
         }
       }
       else {
@@ -141,8 +154,8 @@ void loop() {
 
 
 void detectWalking() {
-  // int readData = analogRead(PIN_WALKING_DETECTION);
-  int readData = 1023;
+  int readData = analogRead(PIN_WALKING_DETECTION);
+  // int readData = 1023;
 
   if ( isWalking ) {
     if ( readData >= WALK_DETECT_THRESHOLD )
