@@ -1,6 +1,14 @@
-/*  gatchaProj_main_v0.3.ino
+/*  gatchaProj_main_v0.4.ino
 
-    v0.3 변경점 : 각 모드를 while문으로 묶고, 특정 조건에서 break 하도록 변경
+    v0.3 변경점
+    각 모드를 while문으로 묶고, 특정 조건에서 break 하도록 변경.
+    복구 모드에서 원점으로 돌아갈 때 메인모터 거꾸로 회전하도록 함.
+    기타 버그 수정.
+    
+    v0.4 변경점
+    복구 모드에서 걸으면 복구 모드 취소하고 다시 걷는중 모드로 전환
+
+    
     2021-06-19
     Minju Park (pmz671712@gmail.com)
 */
@@ -162,6 +170,7 @@ void loop() {
     case MODE_RESTORE:  // 원점 복구 모드
       while(1) {
         detectMainOrigin();
+        detectWalking();
         // 메인모터 거꾸로 돌릴수 있으면 거꾸로 돌리는게 나을듯
         if(isOrigin) {
           digitalWrite(PIN_IN1,LOW);
@@ -175,6 +184,22 @@ void loop() {
           digitalWrite(PIN_IN1, LOW);
           digitalWrite(PIN_IN2, HIGH);
           isMainMotorOn = true;
+        }
+
+        // 복구 모드 중간에 걸으면 모터 끄고 다시 걷는중 모드로 전환
+        if(isWalking) {
+          // 모터 끄고 잠시 딜레이
+          digitalWrite(PIN_IN1,LOW);
+          digitalWrite(PIN_IN2,LOW);
+          delay(100);
+          mode = MODE_WALKING; // 걷는중 모드로 전환
+          // 메인모터 켜기
+          digitalWrite(PIN_IN1, HIGH);
+          digitalWrite(PIN_IN2, LOW);
+          mainMotorOnTime = timer0_millis;
+          isMainMotorOn = true;
+          delay(MIN_WALK_MODE_TIME);
+          break;
         }
       }
 
