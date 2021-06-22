@@ -9,5 +9,5 @@ void setup() {
 void loop() {
   // put your main code here, to run repeatedly:
   Serial.println(analogRead(PIN_ANALOG));
-//  delay(100);
+  delay(100);
 }

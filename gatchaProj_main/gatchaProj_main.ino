@@ -1,4 +1,5 @@
-/*  gatchaProj_main_v0.4.ino
+/*  gatchaProj_main.ino
+    v1.0
 
     v0.3 변경점
     각 모드를 while문으로 묶고, 특정 조건에서 break 하도록 변경.
@@ -8,8 +9,12 @@
     v0.4 변경점
     복구 모드에서 걸으면 복구 모드 취소하고 다시 걷는중 모드로 전환
 
-    
-    2021-06-19
+    2021-06-22 full version 1.0 release
+    복구모드 진입 후 10초 이후에는 걷는중 모드로 전환되지 않게 변경
+    MAX_RESTORE_TO_WALKING_MODE_TIME 변수 변경시 해당 시간 수정 가능
+
+
+    2021-06-22
     Minju Park (pmz671712@gmail.com)
 */
 
@@ -40,6 +45,7 @@ const int AFTER_GATCHA_DELAY_TIME = 10000; // (ms) 가챠 투하 후 기기 휴�
 const int MIN_GATCHA_MOTOR_ON_TIME = 1500;  // (ms) 시작하자마자 가챠 투하모드 끝나는거 방지하기 위한 최소 작동 시간
 const int MAX_GATCHA_MOTOR_ON_TIME = 5000;   // (ms) 가챠 투하모드 최대 지속시간
 const int MIN_WALK_MODE_TIME = 5000; // (ms) 걷기모드 최소 지속시간
+const int MAX_RESTORE_TO_WALKING_MODE_TIME = 10000; // (ms) 복구 모드 진입 후 걷기 모드 진입가능한 최대 시간
 
 // 동작 상태 관련 변수 (boolean)
 volatile bool isWalking = false;        // true = 걷는중 / false = 걷지않는중
@@ -52,6 +58,7 @@ unsigned long lastWalkTime = 0;         // 마지막으로 걸음 간지된 시�
 unsigned long mainMotorOnTime = 0;      // 마지막으로 메인모터 작동 시작 시간
 unsigned long lastOriginTime = 0;       // 마지막으로 원점에 도착한 시간
 unsigned long gatchaMotorOnTime = 0;    // 마지막으로 가챠모터 작동 시작 시간
+unsigned long lastRestoreOntime = 0;
 
 // Count 변수
 unsigned int total_complete = 0;
@@ -168,6 +175,7 @@ void loop() {
     break;
 
     case MODE_RESTORE:  // 원점 복구 모드
+      lastRestoreOntime = timer0_millis;
       while(1) {
         detectMainOrigin();
         detectWalking();
@@ -187,7 +195,8 @@ void loop() {
         }
 
         // 복구 모드 중간에 걸으면 모터 끄고 다시 걷는중 모드로 전환
-        if(isWalking) {
+        // v0.5 changed : 복구 모드 진입 후 일정 시간 안에만 걷는중 모드로 다시 전환하도록 변경
+        if(isWalking && timer0_millis - lastRestoreOntime <= MAX_RESTORE_TO_WALKING_MODE_TIME ) {
           // 모터 끄고 잠시 딜레이
           digitalWrite(PIN_IN1,LOW);
           digitalWrite(PIN_IN2,LOW);
@@ -246,10 +255,6 @@ void detectMainOrigin() {
       lastOriginTime = timer0_millis;
     }
   }
-}
-
-void mainMotorOn() {
-
 }
 
 void mainMotorOff() {
