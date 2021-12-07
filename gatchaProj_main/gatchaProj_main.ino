@@ -196,7 +196,8 @@ void loop() {
 
         // 복구 모드 중간에 걸으면 모터 끄고 다시 걷는중 모드로 전환
         // v0.5 changed : 복구 모드 진입 후 일정 시간 안에만 걷는중 모드로 다시 전환하도록 변경
-        if(isWalking && timer0_millis - lastRestoreOntime <= MAX_RESTORE_TO_WALKING_MODE_TIME ) {
+//        if(isWalking && timer0_millis - lastRestoreOntime <= MAX_RESTORE_TO_WALKING_MODE_TIME ) {
+        if( isWalking ) {
           // 모터 끄고 잠시 딜레이
           digitalWrite(PIN_IN1,LOW);
           digitalWrite(PIN_IN2,LOW);
